@@ -37,13 +37,39 @@ export async function sendMessage(
       sender_id: user.id,
       receiver_id: receiverId,
       content: content.trim(),
-      status: "sent", // initial status
+  status: "sent", // initial status
     })
     .select()
     .single()
 
   if (error) {
-    throw new Error("Failed to send message")
+  console.error("sendMessage: insert error", error)
+  // If the error indicates the 'status' column is missing in the DB schema, retry without it.
+  const msg = String(error.message || error)
+  if (msg.includes("Could not find the 'status' column") || msg.includes("column \"status\" does not exist")) {
+    console.warn("sendMessage: retrying insert without status column due to schema mismatch")
+    const { data: data2, error: error2 } = await supabase
+      .from("messages")
+      .insert({
+        sender_id: user.id,
+        receiver_id: receiverId,
+        content: content.trim(),
+      })
+      .select()
+      .single()
+
+    if (error2) {
+      console.error("sendMessage: retry insert without status failed", error2)
+      throw new Error("Failed to send message: " + (error2.message || String(error2)))
+    }
+
+    // use the retried insert result
+    // @ts-ignore
+    data = data2
+  } else {
+    // include database error message for debugging in server logs
+    throw new Error("Failed to send message: " + (error.message || String(error)))
+  }
   }
 
   // insert attachments if provided
