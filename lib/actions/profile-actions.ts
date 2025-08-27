@@ -33,6 +33,38 @@ export async function updateProfile(formData: {
   revalidatePath("/profile")
 }
 
+export async function updateProfileWithAvatar(formData: { displayName: string; bio: string; avatarUrl?: string | null }) {
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    throw new Error("Not authenticated")
+  }
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      display_name: formData.displayName,
+      bio: formData.bio,
+      avatar_url: formData.avatarUrl ?? null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", user.id)
+
+  if (error) {
+    throw new Error("Failed to update profile")
+  }
+
+  // revalidate pages that use profile/avatar
+  revalidatePath("/profile")
+  revalidatePath("/messages")
+  revalidatePath("/discover")
+  return true
+}
+
 export async function uploadAvatar(file: File) {
   const supabase = await createClient()
 
@@ -58,39 +90,53 @@ export async function uploadAvatar(file: File) {
   const fileExt = file.name.split(".").pop()
   const fileName = `${user.id}-${Date.now()}.${fileExt}`
   const filePath = `avatars/${fileName}`
-
   // Upload file to Supabase Storage
-  const { error: uploadError } = await supabase.storage.from("avatars").upload(filePath, file, {
-    cacheControl: "3600",
-    upsert: false,
-  })
+  try {
+    // server actions run in Node — convert File to ArrayBuffer/Buffer for upload
+    const arrayBuffer = await file.arrayBuffer()
+    const buffer = Buffer.from(arrayBuffer)
 
-  if (uploadError) {
+    const { error: uploadError } = await supabase.storage.from("avatars").upload(filePath, buffer, {
+      cacheControl: "3600",
+      upsert: false,
+      // contentType may help storage identify the MIME
+      contentType: file.type,
+    } as any)
+
+    if (uploadError) {
+      console.error("Supabase upload error:", uploadError)
+      throw new Error("Failed to upload avatar")
+    }
+
+    // Get public URL
+    const pubRes = supabase.storage.from("avatars").getPublicUrl(filePath)
+    const publicUrl = (pubRes as any)?.data?.publicUrl || null
+
+    if (!publicUrl) {
+      console.warn("No public URL returned for avatar upload")
+    }
+
+    // Update profile with new avatar URL
+    const { error: updateError } = await supabase
+      .from("profiles")
+      .update({
+        avatar_url: publicUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", user.id)
+
+    if (updateError) {
+      // Clean up uploaded file if profile update fails
+      await supabase.storage.from("avatars").remove([filePath])
+      throw new Error("Failed to update profile with new avatar")
+    }
+
+    revalidatePath("/profile")
+    return publicUrl
+  } catch (err) {
+    console.error("uploadAvatar error:", err)
     throw new Error("Failed to upload avatar")
   }
-
-  // Get public URL
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from("avatars").getPublicUrl(filePath)
-
-  // Update profile with new avatar URL
-  const { error: updateError } = await supabase
-    .from("profiles")
-    .update({
-      avatar_url: publicUrl,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", user.id)
-
-  if (updateError) {
-    // Clean up uploaded file if profile update fails
-    await supabase.storage.from("avatars").remove([filePath])
-    throw new Error("Failed to update profile with new avatar")
-  }
-
-  revalidatePath("/profile")
-  return publicUrl
 }
 
 export async function removeAvatar() {

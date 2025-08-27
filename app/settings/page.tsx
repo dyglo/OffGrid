@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { AppLayout } from "@/components/layout/app-layout"
-import { ProfileDisplay } from "@/components/profile/profile-display"
+// ProfileDisplay removed — always show edit form directly
 import { ProfileEditForm } from "@/components/profile/profile-edit-form"
 import { getCurrentProfile } from "@/lib/actions/profile-actions"
 import { ArrowLeft } from "lucide-react"
@@ -28,7 +28,7 @@ interface Profile {
 export default function SettingsPage() {
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [isEditing, setIsEditing] = useState(false)
+  // always show edit screen by default to avoid conflicting edit flows
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const supabase = createClient()
@@ -71,7 +71,6 @@ export default function SettingsPage() {
   }, [supabase, router])
 
   const handleEditComplete = async () => {
-    setIsEditing(false)
     // Reload profile data
     try {
       const { profile: updatedProfile } = await getCurrentProfile()
@@ -150,45 +149,41 @@ export default function SettingsPage() {
         {/* Content */}
         <div className="flex-1 p-4 overflow-y-auto">
           <div className="max-w-2xl mx-auto">
-            {isEditing ? (
-              <>
-                <ProfileEditForm
-                  initialData={{
-                    displayName: profile.display_name,
-                    bio: profile.bio,
-                    avatarUrl: profile.avatar_url,
-                    status: (profile as any).status || "away",
-                    email: user.email,
-                  }}
-                  onCancel={() => setIsEditing(false)}
-                  onSave={handleEditComplete}
-                />
-                <div className="mt-8">
-                  <div className="bg-gradient-to-b from-[#18120a] to-[#181818] border border-[#222] shadow-lg rounded-2xl p-6">
-                    <h2 className="text-white text-lg font-semibold mb-4">Profile Preview</h2>
-                    <div className="flex items-center gap-4">
-                      <img
-                        src={profile.avatar_url || "/placeholder-user.jpg"}
-                        alt={profile.display_name}
-                        className="w-14 h-14 rounded-full object-cover border-2 border-[#222]"
-                      />
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-white font-semibold text-base">{profile.display_name}</span>
-                        </div>
-                        <div className="text-gray-400 text-sm">{profile.bio || "A.k.a the app Owner"}</div>
-                        <div className="flex items-center gap-1 mt-1">
-                          <span className="inline-block w-3 h-3 rounded-full bg-yellow-400" />
-                          <span className="text-yellow-400 text-xs">Away</span>
-                        </div>
+            <>
+              <ProfileEditForm
+                initialData={{
+                  displayName: profile.display_name,
+                  bio: profile.bio,
+                  avatarUrl: profile.avatar_url,
+                  status: (profile as any).status || "away",
+                  email: user.email,
+                }}
+                onCancel={() => router.back()}
+                onSave={handleEditComplete}
+              />
+              <div className="mt-8">
+                <div className="bg-gradient-to-b from-[#18120a] to-[#181818] border border-[#222] shadow-lg rounded-2xl p-6">
+                  <h2 className="text-white text-lg font-semibold mb-4">Profile Preview</h2>
+                  <div className="flex items-center gap-4">
+                    <img
+                      src={profile.avatar_url || "/placeholder-user.jpg"}
+                      alt={profile.display_name}
+                      className="w-14 h-14 rounded-full object-cover border-2 border-[#222]"
+                    />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-white font-semibold text-base">{profile.display_name}</span>
+                      </div>
+                      <div className="text-gray-400 text-sm">{profile.bio || "A.k.a the app Owner"}</div>
+                      <div className="flex items-center gap-1 mt-1">
+                        <span className="inline-block w-3 h-3 rounded-full bg-yellow-400" />
+                        <span className="text-yellow-400 text-xs">Away</span>
                       </div>
                     </div>
                   </div>
                 </div>
-              </>
-            ) : (
-              <ProfileDisplay profile={profile} userEmail={user.email} onEdit={() => setIsEditing(true)} />
-            )}
+              </div>
+            </>
           </div>
         </div>
       </div>

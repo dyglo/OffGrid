@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { AvatarUpload } from "./avatar-upload"
-import { updateProfile } from "@/lib/actions/profile-actions"
+import { updateProfile, updateProfileWithAvatar } from "@/lib/actions/profile-actions"
 import { ProfileStatusSelect, ProfileStatus } from "@/app/settings/profile-status"
 
 interface ProfileEditFormProps {
@@ -42,12 +42,11 @@ export function ProfileEditForm({ initialData, onCancel, onSave }: ProfileEditFo
 
     startTransition(async () => {
       try {
-        await updateProfile({
-          displayName: displayName.trim(),
-          bio: bio.trim(),
-          // status, // Uncomment if backend supports status
-          // avatarUrl, // Uncomment if backend supports avatarUrl
-        })
+        if (avatarUrl) {
+          await updateProfileWithAvatar({ displayName: displayName.trim(), bio: bio.trim(), avatarUrl })
+        } else {
+          await updateProfile({ displayName: displayName.trim(), bio: bio.trim() })
+        }
         onSave()
       } catch (error) {
         console.error("Failed to update profile:", error)
