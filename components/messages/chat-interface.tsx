@@ -85,6 +85,18 @@ export function ChatInterface({ partnerId, partnerName, currentUserId, onBack }:
     load()
   }, [partnerId])
 
+  // listen for retry reconciliation
+  useEffect(() => {
+    const handler = (e: any) => {
+      const detail = e?.detail
+      if (!detail) return
+      const { oldId, newId, status, created_at } = detail
+      setMessages((m) => m.map((msg) => (msg.id === oldId ? { ...msg, id: newId, status, created_at } : msg)))
+    }
+    window.addEventListener("offgrid:message:retry", handler as EventListener)
+    return () => window.removeEventListener("offgrid:message:retry", handler as EventListener)
+  }, [])
+
   useEffect(() => {
     scrollToBottom()
   }, [messages])
@@ -92,6 +104,7 @@ export function ChatInterface({ partnerId, partnerName, currentUserId, onBack }:
   useEffect(() => {
     const channel = supabase
       .channel(`messages-${partnerId}-${currentUserId}`)
+      // listen for new messages
       .on(
         "postgres_changes",
         {
@@ -100,13 +113,62 @@ export function ChatInterface({ partnerId, partnerName, currentUserId, onBack }:
           table: "messages",
           filter: `or(and(sender_id.eq.${currentUserId},receiver_id.eq.${partnerId}),and(sender_id.eq.${partnerId},receiver_id.eq.${currentUserId}))`,
         },
-        async () => {
-          const newMessages = await getMessages(partnerId)
-          const normalized = (newMessages || []).map((m: any) => ({
-            ...m,
-            attachments: (m.attachments || []).map((a: any) => ({ url: a.file_url || a.url, type: a.file_type || a.type, name: a.file_name || a.name, file_size: a.file_size }))
-          }))
-          setMessages(normalized)
+        async (payload: any) => {
+          try {
+            const m = payload?.new
+            if (!m) return
+            const normalized = {
+              ...m,
+              attachments: (m.attachments || []).map((a: any) => ({ url: a.file_url || a.url, type: a.file_type || a.type, name: a.file_name || a.name, file_size: a.file_size })),
+            }
+
+            setMessages((prev) => {
+              // remove duplicates by id
+              if (prev.find((msg) => msg.id === normalized.id)) return prev
+
+              // remove optimistic placeholder that matches by content/attachments for the same sender
+              const filtered = prev.filter((msg) => {
+                if (msg.sender_id === normalized.sender_id && msg.id.startsWith("temp-")) {
+                  // match by content
+                  if (normalized.content && msg.content && normalized.content === msg.content) return false
+                  // match by attachments (simple name match)
+                  if (
+                    Array.isArray(normalized.attachments) &&
+                    Array.isArray(msg.attachments) &&
+                    normalized.attachments.length > 0 &&
+                    msg.attachments.length > 0 &&
+                    normalized.attachments[0].name === msg.attachments[0].name
+                  ) {
+                    return false
+                  }
+                }
+                return true
+              })
+
+              return [...filtered, normalized]
+            })
+          } catch (e) {
+            console.error("Realtime INSERT handler error", e)
+          }
+        },
+      )
+      // listen for updates (status changes)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "messages",
+          filter: `or(and(sender_id.eq.${currentUserId},receiver_id.eq.${partnerId}),and(sender_id.eq.${partnerId},receiver_id.eq.${currentUserId}))`,
+        },
+        async (payload: any) => {
+          try {
+            const m = payload?.new
+            if (!m) return
+            setMessages((prev) => prev.map((msg) => (msg.id === m.id ? { ...msg, status: m.status ?? msg.status } : msg)))
+          } catch (e) {
+            console.error("Realtime UPDATE handler error", e)
+          }
         },
       )
       .subscribe()
@@ -167,16 +229,33 @@ export function ChatInterface({ partnerId, partnerName, currentUserId, onBack }:
     setIsSending(true)
     try {
       if (newMessage.trim()) {
-        await sendMessage(partnerId, newMessage)
-        setNewMessage("")
+        // optimistic UI
+        const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        const optimisticMessage: Message = {
+          id: tempId,
+          content: newMessage,
+          created_at: new Date().toISOString(),
+          sender_id: currentUserId,
+          receiver_id: partnerId,
+          status: "sending",
+        }
+        setMessages((m) => [...m, optimisticMessage])
+
+        try {
+          const res = await sendMessage(partnerId, newMessage)
+          // reconcile optimistic message with server result
+          setMessages((m) => m.map((msg) => (msg.id === tempId ? { ...msg, id: res.id, status: res.status || "sent", created_at: res.created_at } : msg)))
+          setNewMessage("")
+        } catch (err) {
+          // mark failed
+          setMessages((m) => m.map((msg) => (msg.id === tempId ? { ...msg, status: "failed" } : msg)))
+          toast({ title: "Error", description: "Failed to send message", variant: "destructive" })
+        }
       }
       if (selectedFile) {
         toast({ title: "File upload", description: "Attachments are uploaded by the backend. UI preview only for now." })
         setSelectedFile(null)
       }
-    } catch (err) {
-      console.error(err)
-      toast({ title: "Error", description: "Failed to send message", variant: "destructive" })
     } finally {
       setIsSending(false)
     }

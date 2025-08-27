@@ -99,10 +99,31 @@ export function MessageBubble({ message, isOwn, sender, status }: MessageBubbleP
             </div>
           )}
 
-          <div className={`text-xs mt-2 text-gray-600 flex items-center ${isOwn ? "justify-end" : "justify-start"} gap-2`}>
-            <span>{formatDistanceToNow(new Date(message.created_at), { addSuffix: true })}</span>
-            {isOwn && <MessageStatus status={status} />}
-          </div>
+                  <div className={`text-xs mt-2 text-gray-600 flex items-center ${isOwn ? "justify-end" : "justify-start"} gap-2`}>
+                    <span>{formatDistanceToNow(new Date(message.created_at), { addSuffix: true })}</span>
+                    {isOwn && <MessageStatus status={status} />}
+                    {/* retry button for failed sends */}
+                    {isOwn && status === "failed" && (
+                      <button
+                        className="text-xs text-red-400 ml-2 underline"
+                        onClick={async () => {
+                          // simple retry: call sendMessage again
+                          try {
+                            const { sendMessage: sendFn } = await import("@/lib/actions/message-actions")
+                            const res = await sendFn(message.receiver_id, message.content || "")
+                            // update status
+                            // @ts-ignore
+                            const event = new CustomEvent("offgrid:message:retry", { detail: { oldId: message.id, newId: res.id, status: res.status || "sent", created_at: res.created_at } })
+                            window.dispatchEvent(event)
+                          } catch (e) {
+                            console.error(e)
+                          }
+                        }}
+                      >
+                        Retry
+                      </button>
+                    )}
+                  </div>
         </div>
       </div>
     </div>
