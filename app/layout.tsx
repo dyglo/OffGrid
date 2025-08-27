@@ -8,6 +8,10 @@ export const metadata: Metadata = {
   title: "OffGrid - Social Messaging",
   description: "Professional social messaging app with real-time chat and file sharing",
   generator: "v0.app",
+  icons: {
+    icon: '/favicon.svg',
+    apple: '/favicon.svg',
+  },
 }
 
 export default function RootLayout({
@@ -17,6 +21,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
+      <head>
+        <link rel="icon" href="/favicon.svg" />
+        <link rel="apple-touch-icon" href="/favicon.svg" />
+        <meta name="theme-color" content="#000000" />
+      </head>
       <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable} antialiased bg-black text-white min-h-screen`}> 
         <div className="relative min-h-screen flex flex-col">
           {children}

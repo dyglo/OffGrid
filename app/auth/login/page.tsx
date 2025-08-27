@@ -42,7 +42,8 @@ export default function LoginPage() {
     <div className="flex min-h-screen w-full items-center justify-center p-6 bg-background">
       <div className="w-full max-w-sm">
         <div className="flex flex-col gap-6">
-          <div className="text-center mb-8">
+          <div className="text-center mb-8 flex flex-col items-center gap-3">
+            <img src="/favicon.svg" alt="OffGrid logo" className="w-16 h-16 mx-auto" />
             <h1 className="text-3xl font-bold text-primary">OffGrid</h1>
             <p className="text-muted-foreground mt-2">Professional Social Messaging</p>
           </div>
