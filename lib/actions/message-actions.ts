@@ -37,6 +37,7 @@ export async function sendMessage(
       sender_id: user.id,
       receiver_id: receiverId,
       content: content.trim(),
+      status: "sent", // initial status
     })
     .select()
     .single()
@@ -87,7 +88,36 @@ export async function sendMessage(
   }
 
   revalidatePath("/messages")
+  // If this send is a reply from the current user, mark any incoming messages from the receiver as read
+  try {
+    await supabase
+      .from("messages")
+      .update({ status: "read" })
+      .match({ sender_id: receiverId, receiver_id: user.id })
+      .neq("status", "read")
+  } catch (err) {
+    console.error("Failed to mark messages as read on reply", err)
+  }
   return data
+}
+
+export async function markMessageDelivered(messageId: string) {
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) throw new Error("Not authenticated")
+
+  try {
+    const { error } = await supabase.from("messages").update({ status: "delivered" }).eq("id", messageId)
+    if (error) console.error("Failed to mark delivered", error)
+  } catch (err) {
+    console.error("markMessageDelivered error", err)
+  }
+
+  revalidatePath("/messages")
 }
 
 export async function getConversations() {

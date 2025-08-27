@@ -107,7 +107,8 @@ export async function acceptFollowRequest(followerId: string) {
   const { error: acceptedNotificationError } = await supabase.from("follow_notifications").insert({
     follower_id: followerId,
     following_id: user.id,
-    status: 'accepted'
+  status: 'accepted',
+  notification_shown: false
   })
 
   if (acceptedNotificationError) {
@@ -117,6 +118,31 @@ export async function acceptFollowRequest(followerId: string) {
   revalidatePath("/requests")
   revalidatePath("/friends")
   revalidatePath("/discover")
+}
+
+export async function markFollowNotificationShown(notificationId: string) {
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    throw new Error("Not authenticated")
+  }
+
+  const { error } = await supabase
+    .from('follow_notifications')
+    .update({ notification_shown: true })
+    .eq('id', notificationId)
+    .eq('follower_id', user.id)
+
+  if (error) {
+    console.error('Failed to mark notification shown:', error)
+  }
+
+  // revalidate relevant paths
+  revalidatePath('/requests')
 }
 
 export async function rejectFollowRequest(followerId: string) {
@@ -318,7 +344,8 @@ export async function getFollowNotifications() {
       id,
       follower_id,
       following_id,
-      status,
+  status,
+  notification_shown,
       created_at,
       follower:profiles!follow_notifications_follower_id_fkey (
         id,

@@ -60,6 +60,10 @@ export function ChatInterface({ partnerId, partnerName, currentUserId, onBack }:
   const [partnerTyping, setPartnerTyping] = useState(false)
   const [partnerOnline, setPartnerOnline] = useState<boolean | null>(null)
   const typingTimeoutRef = useRef<number | null>(null)
+  const typingStoppedTimeout = useRef<number | null>(null)
+  const lastTypingSent = useRef<number>(0)
+  const typingChannelRef = useRef<any>(null)
+  const typingReceiveChannelRef = useRef<any>(null)
   useHideBottomNav()
 
   const scrollToBottom = () => {
@@ -175,11 +179,6 @@ export function ChatInterface({ partnerId, partnerName, currentUserId, onBack }:
 
     const presence = supabase
       .channel(`presence-${partnerId}`)
-      .on("broadcast", { event: "typing" }, (payload: any) => {
-        if (payload?.user_id === partnerId && payload?.to === currentUserId) {
-          setPartnerTyping(Boolean(payload?.isTyping))
-        }
-      })
       .on("broadcast", { event: "presence" }, (payload: any) => {
         if (payload?.user_id === partnerId) {
           setPartnerOnline(Boolean(payload?.online))
@@ -193,35 +192,70 @@ export function ChatInterface({ partnerId, partnerName, currentUserId, onBack }:
     }
   }, [partnerId, currentUserId, supabase])
 
+  // Typing channels and local debounce/rate-limit logic
   useEffect(() => {
-    const sendTyping = async (isTyping: boolean) => {
-      try {
-        const ch = supabase.channel(`presence-${partnerId}`)
-        // @ts-ignore internal broadcast
-        ch.send({ type: "broadcast", event: "typing", payload: { user_id: currentUserId, to: partnerId, isTyping } })
-      } catch (e) {
-        // ignore
-      }
+    // sender channel: used to broadcast our typing state to partner
+    try {
+      const sender = supabase.channel(`typing-${currentUserId}-${partnerId}`).subscribe()
+      typingChannelRef.current = sender
+
+      // receiver channel: listen for partner typing events targeted to us
+      const receiver = supabase
+        .channel(`typing-${partnerId}-${currentUserId}`)
+        .on("broadcast", { event: "typing" }, (payload: any) => {
+          if (payload?.user_id === partnerId && payload?.to === currentUserId) {
+            setPartnerTyping(Boolean(payload?.isTyping))
+          }
+        })
+        .on("broadcast", { event: "stopped_typing" }, (payload: any) => {
+          if (payload?.user_id === partnerId && payload?.to === currentUserId) {
+            setPartnerTyping(false)
+          }
+        })
+        .subscribe()
+      typingReceiveChannelRef.current = receiver
+    } catch (e) {
+      // ignore channel creation errors
     }
 
-    if (newMessage.length > 0) {
-      sendTyping(true)
-      if (typingTimeoutRef.current) window.clearTimeout(typingTimeoutRef.current)
-      typingTimeoutRef.current = window.setTimeout(() => {
-        sendTyping(false)
-        typingTimeoutRef.current = null
-      }, 1500)
-    } else {
-      sendTyping(false)
-    }
-
+    // cleanup
     return () => {
-      if (typingTimeoutRef.current) {
-        window.clearTimeout(typingTimeoutRef.current)
-        typingTimeoutRef.current = null
-      }
+      // broadcast that we stopped typing when leaving
+      try {
+        const ch = typingChannelRef.current
+        if (ch) ch.send({ type: "broadcast", event: "stopped_typing", payload: { user_id: currentUserId, to: partnerId } })
+      } catch (e) {}
+      if (typingChannelRef.current) supabase.removeChannel(typingChannelRef.current)
+      if (typingReceiveChannelRef.current) supabase.removeChannel(typingReceiveChannelRef.current)
+      if (typingStoppedTimeout.current) window.clearTimeout(typingStoppedTimeout.current)
     }
-  }, [newMessage, supabase, currentUserId, partnerId])
+  }, [currentUserId, partnerId, supabase])
+
+  // Keystroke handler invoked from MessageInput
+  const handleLocalTyping = () => {
+    const now = Date.now()
+    const MIN_SEND_INTERVAL = 2000 // ms - only send 'typing' at most every 2s
+
+    try {
+      const ch = typingChannelRef.current
+      if (now - lastTypingSent.current >= MIN_SEND_INTERVAL) {
+        if (ch) ch.send({ type: "broadcast", event: "typing", payload: { user_id: currentUserId, to: partnerId, isTyping: true } })
+        lastTypingSent.current = now
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    // reset stopped timer - when this fires we consider typing stopped
+    if (typingStoppedTimeout.current) window.clearTimeout(typingStoppedTimeout.current)
+    typingStoppedTimeout.current = window.setTimeout(() => {
+      try {
+        const ch = typingChannelRef.current
+        if (ch) ch.send({ type: "broadcast", event: "stopped_typing", payload: { user_id: currentUserId, to: partnerId } })
+      } catch (e) {}
+      typingStoppedTimeout.current = null
+    }, 3000)
+  }
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -246,6 +280,15 @@ export function ChatInterface({ partnerId, partnerName, currentUserId, onBack }:
           // reconcile optimistic message with server result
           setMessages((m) => m.map((msg) => (msg.id === tempId ? { ...msg, id: res.id, status: res.status || "sent", created_at: res.created_at } : msg)))
           setNewMessage("")
+          // clear typing state (we sent a message)
+          try {
+            const ch = typingChannelRef.current
+            if (ch) ch.send({ type: "broadcast", event: "stopped_typing", payload: { user_id: currentUserId, to: partnerId } })
+          } catch (e) {}
+          if (typingStoppedTimeout.current) {
+            window.clearTimeout(typingStoppedTimeout.current)
+            typingStoppedTimeout.current = null
+          }
         } catch (err) {
           // mark failed
           setMessages((m) => m.map((msg) => (msg.id === tempId ? { ...msg, status: "failed" } : msg)))
@@ -365,10 +408,10 @@ export function ChatInterface({ partnerId, partnerName, currentUserId, onBack }:
   // root chat container: fill viewport below the sticky header (header is h-12 / 3rem)
   // fixed chat container: position under the app header to guarantee single-viewport layout
   <div className="fixed left-0 right-0 flex flex-col overflow-hidden bg-black" style={{ top: '3.5rem', bottom: 0, zIndex: 40 }}>
-      {/* Header */}
-  <div className="flex-none flex items-center space-x-3 p-4 border-b border-[#111111] bg-[#0a0a0a]">
-  <Button variant="ghost" size="sm" onClick={onBack} className="lg:hidden text-white hover:bg-gray-800">
-          <ArrowLeft className="h-4 w-4" />
+      {/* Header - WhatsApp-style flat horizontal bar */}
+      <div className="flex-none h-14 flex items-center px-3 gap-3 bg-black text-white" style={{ zIndex: 45 }}>
+        <Button variant="ghost" size="sm" onClick={onBack} className="lg:hidden text-white hover:bg-transparent p-2">
+          <ArrowLeft className="h-5 w-5" />
         </Button>
 
         <Avatar className="h-10 w-10">
@@ -376,18 +419,15 @@ export function ChatInterface({ partnerId, partnerName, currentUserId, onBack }:
           <AvatarFallback className="bg-[#111111] text-yellow-400">{partnerName.charAt(0).toUpperCase()}</AvatarFallback>
         </Avatar>
 
-        <div className="ml-2">
-          <div className="flex items-center gap-3">
-            <p className="text-sm font-medium text-white">{partnerName}</p>
-            <div className="flex items-center gap-2">
-              <span className={`h-2 w-2 rounded-full ${partnerOnline === null ? "bg-gray-500" : partnerOnline ? "bg-green-400" : "bg-gray-600"}`}></span>
-              <span className="text-xs text-gray-300">{partnerTyping ? "typing..." : partnerOnline ? "Online" : "Offline"}</span>
-            </div>
-          </div>
-          {partnerProfile?.bio && <p className="text-xs text-gray-400">{partnerProfile.bio}</p>}
+        <div className="flex flex-col justify-center min-w-0">
+          <p className="text-sm font-semibold text-white truncate">{partnerName}</p>
+          <span className="text-xs text-gray-400">
+            {partnerOnline === null ? "Status unknown" : partnerOnline ? "Online" : "Offline"}
+          </span>
         </div>
 
-  {/* intentionally left empty: removed View Profile button per UX request */}
+        <div className="flex-1" />
+        {/* reserved space for future action buttons; intentionally empty to match spec (no call buttons) */}
       </div>
 
   {/* Messages list */}
@@ -412,7 +452,7 @@ export function ChatInterface({ partnerId, partnerName, currentUserId, onBack }:
             })}
           </AnimatePresence>
 
-          {partnerTyping && <TypingIndicator name={partnerName} />}
+          {/* messages */}
 
           <div ref={messagesEndRef} />
         </div>
@@ -452,6 +492,7 @@ export function ChatInterface({ partnerId, partnerName, currentUserId, onBack }:
       <MessageInput
         value={newMessage}
         onChange={(v) => setNewMessage(v)}
+        onUserTyping={handleLocalTyping}
         onSend={(e) => {
           // call async handler
           handleSendMessage(e as React.FormEvent)
@@ -459,6 +500,12 @@ export function ChatInterface({ partnerId, partnerName, currentUserId, onBack }:
         onFileClick={() => fileInputRef.current?.click()}
         disabled={isSending || isUploading}
       />
+      {/* Typing indicator positioned above the input (subtle, muted). Rendered outside of messages list to avoid floating card look. */}
+      {partnerTyping && (
+        <div className="flex-none px-4 pb-2 pt-1 bg-black text-gray-400 text-sm">
+          <TypingIndicator name={partnerName} small />
+        </div>
+      )}
     </div>
   )
 }

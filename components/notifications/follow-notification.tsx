@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
-import { getFollowNotifications } from "@/lib/actions/follow-actions"
+import { getFollowNotifications, markFollowNotificationShown } from "@/lib/actions/follow-actions"
 import { useToast } from "@/hooks/use-toast"
 import { motion, AnimatePresence } from "framer-motion"
 import { MessageCircle, Check, X } from "lucide-react"
@@ -53,6 +53,12 @@ export function FollowNotifications() {
   }
 
   const handleStartChat = (userId: string, userName: string) => {
+    // Find notification for this user (if any) and mark it shown so it's not repeated
+    const notif = notifications.find(n => n.following_id === userId && n.status === 'accepted' && !n.notification_shown)
+    if (notif) {
+      // fire-and-forget: mark shown, then navigate
+      markFollowNotificationShown(notif.id).catch(() => {})
+    }
     router.push(`/messages?user=${userId}&name=${encodeURIComponent(userName)}`)
   }
 
@@ -109,14 +115,17 @@ export function FollowNotifications() {
     )
   }
 
-  if (notifications.length === 0) {
+  // filter out already-shown notifications
+  const visibleNotifications = notifications.filter(n => !n.notification_shown)
+
+  if (visibleNotifications.length === 0) {
     return null
   }
 
   return (
     <div className="space-y-3">
       <AnimatePresence>
-        {notifications.map((notification, index) => (
+  {visibleNotifications.map((notification, index) => (
           <motion.div
             key={notification.id}
             initial={{ opacity: 0, x: 300 }}

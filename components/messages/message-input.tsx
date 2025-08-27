@@ -6,12 +6,13 @@ import { Send, Paperclip, Smile } from "lucide-react"
 interface MessageInputProps {
   value: string
   onChange: (v: string) => void
+  onUserTyping?: () => void
   onSend: (e: React.FormEvent) => void
   onFileClick: () => void
   disabled?: boolean
 }
 
-export function MessageInput({ value, onChange, onSend, onFileClick, disabled = false }: MessageInputProps) {
+export function MessageInput({ value, onChange, onUserTyping, onSend, onFileClick, disabled = false }: MessageInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   useEffect(() => {
@@ -40,7 +41,12 @@ export function MessageInput({ value, onChange, onSend, onFileClick, disabled = 
           <textarea
             ref={textareaRef}
             value={value}
-            onChange={(e) => onChange(e.target.value)}
+            onChange={(e) => {
+              onChange(e.target.value)
+              try {
+                if (onUserTyping) onUserTyping()
+              } catch (e) {}
+            }}
             placeholder="Type a message..."
             className="w-full resize-none bg-[#0b0b0b] text-white placeholder:text-gray-500 rounded-xl p-3 pr-12 border border-[#1a1a1a] outline-none max-h-12 overflow-hidden scrollbar-hide h-10"
             rows={1}

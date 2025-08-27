@@ -86,10 +86,13 @@ export async function uploadAvatar(file: File) {
     throw new Error("File size must be less than 5MB")
   }
 
-  // Create unique filename
+  // Create unique filename and store under <userId>/<filename> inside the 'avatars' bucket.
+  // The storage RLS policy checks the first folder segment of the object name against auth.uid(),
+  // so the object name must start with the user id (e.g. '<userId>/file.png').
   const fileExt = file.name.split(".").pop()
   const fileName = `${user.id}-${Date.now()}.${fileExt}`
-  const filePath = `avatars/${fileName}`
+  // object path inside the bucket (do NOT prefix with the bucket name here)
+  const filePath = `${user.id}/${fileName}`
   // Upload file to Supabase Storage
   try {
     // server actions run in Node — convert File to ArrayBuffer/Buffer for upload
@@ -169,9 +172,12 @@ export async function removeAvatar() {
   // Try to delete the file from storage (optional, don't fail if it doesn't exist)
   if (profile?.avatar_url) {
     try {
-      const fileName = profile.avatar_url.split("/").pop()
-      if (fileName) {
-        await supabase.storage.from("avatars").remove([`avatars/${fileName}`])
+      // publicUrl format: https://<project>.supabase.co/storage/v1/object/avatars/<objectPath>
+      const marker = "/object/avatars/"
+      const idx = profile.avatar_url.indexOf(marker)
+      const objectPath = idx !== -1 ? profile.avatar_url.substring(idx + marker.length) : null
+      if (objectPath) {
+        await supabase.storage.from("avatars").remove([objectPath])
       }
     } catch (error) {
       // Ignore storage deletion errors
