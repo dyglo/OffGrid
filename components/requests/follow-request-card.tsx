@@ -27,6 +27,7 @@ interface FollowRequestCardProps {
 
 export function FollowRequestCard({ request, onRequestHandled }: FollowRequestCardProps) {
   const [isLoading, setIsLoading] = useState(false)
+  const [handled, setHandled] = useState<null | 'accepted' | 'rejected'>(null)
   const { toast } = useToast()
   const router = useRouter()
 
@@ -38,7 +39,8 @@ export function FollowRequestCard({ request, onRequestHandled }: FollowRequestCa
         title: "Follow request accepted!",
         description: `You are now following ${request.follower.display_name}`,
       })
-      onRequestHandled()
+  setHandled('accepted')
+  onRequestHandled()
     } catch (error: any) {
       toast({
         title: "Error",
@@ -58,7 +60,8 @@ export function FollowRequestCard({ request, onRequestHandled }: FollowRequestCa
         title: "Follow request rejected",
         description: `Follow request from ${request.follower.display_name} was rejected`,
       })
-      onRequestHandled()
+  setHandled('rejected')
+  onRequestHandled()
     } catch (error: any) {
       toast({
         title: "Error",
@@ -129,23 +132,39 @@ export function FollowRequestCard({ request, onRequestHandled }: FollowRequestCa
         </CardHeader>
         <CardContent className="pt-0">
           <div className="flex space-x-2">
-            <Button
-              onClick={handleAccept}
-              disabled={isLoading}
-              className="flex-1 bg-green-600 hover:bg-green-700 text-white"
-            >
-              <Check className="h-4 w-4 mr-2" />
-              {isLoading ? "..." : "Accept"}
-            </Button>
-            <Button
-              onClick={handleReject}
-              disabled={isLoading}
-              variant="outline"
-              className="flex-1 border-gray-600 text-gray-300 hover:bg-gray-800 hover:text-white"
-            >
-              <X className="h-4 w-4 mr-2" />
-              {isLoading ? "..." : "Reject"}
-            </Button>
+            {!handled && (
+              <>
+                <Button
+                  onClick={handleAccept}
+                  disabled={isLoading}
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                >
+                  <Check className="h-4 w-4 mr-2" />
+                  {isLoading ? "..." : "Accept"}
+                </Button>
+                <Button
+                  onClick={handleReject}
+                  disabled={isLoading}
+                  variant="outline"
+                  className="flex-1 border-gray-600 text-gray-300 hover:bg-gray-800 hover:text-white"
+                >
+                  <X className="h-4 w-4 mr-2" />
+                  {isLoading ? "..." : "Reject"}
+                </Button>
+              </>
+            )}
+
+            {handled === 'accepted' && (
+              <div className="flex-1 flex items-center justify-center bg-green-700 text-white rounded py-2">
+                <Check className="h-4 w-4 mr-2" /> Accepted
+              </div>
+            )}
+
+            {handled === 'rejected' && (
+              <div className="flex-1 flex items-center justify-center bg-gray-700 text-white rounded py-2">
+                <X className="h-4 w-4 mr-2" /> Rejected
+              </div>
+            )}
           </div>
           <div className="mt-3">
             <Button
